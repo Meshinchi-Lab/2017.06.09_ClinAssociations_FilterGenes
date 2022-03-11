@@ -1,0 +1,383 @@
+---
+title: "Nanostring Patient Outcome Correlates"
+author: "Jenny Smith"
+date: "May 22, 2017"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+
+
+```{r setup}
+library(knitr)
+knitr::opts_chunk$set(tidy.opts=list(width.cutoff=50),tidy=TRUE, fig.align='center')
+knitr::opts_knit$set(root.dir = '~/Nanostring_Analysis/2017.06.09_ClinAssociations_FilterGenes/')
+
+```
+
+
+```{r message = FALSE, warning=FALSE}
+library(survival)
+library(RColorBrewer)
+library(colorspace)
+library(stringr)
+library(ggplot2)
+library(GGally)
+library(gridExtra)
+library(grid)
+library(magrittr)
+library(dplyr)
+library(xtable)
+library(pryr)
+library(reshape2)
+
+getwd()
+```
+
+
+```{r}
+source("~/scripts/RNAseq_Analysis/DifferentialExpn_PathwayAnalysis/Expression_Distribution_Plots_Function.r")
+source("~/scripts/RNAseq_Analysis/MSLN_waterfallplots/Waterfall_Barplot_Function_2017.05.22.r")
+```
+
+
+#Define Functions to be used
+
+```{r}
+geneExpn_ClinCor <- function(expnMatrix, clinData, clinCorr, gene){
+  expnMatrix <- t(expnMatrix)
+  relapseInfo <- merge(clinData,expnMatrix, by.x=0, by.y=0)
+  
+  expressors <- relapseInfo[which(relapseInfo[,gene] >= 20), ]
+  nonExpressors <- relapseInfo[which(relapseInfo[,gene] < 20), ]
+  
+  Expressors <- c(length(which(expressors[,clinCorr] == "yes")), 
+                  length(which(expressors[,clinCorr] =="no")))
+  NonExpressors <- c(length(which(nonExpressors[,clinCorr] == "yes")), 
+                     length(which(nonExpressors[,clinCorr] == "no")))
+  
+  contingencyTbl <- rbind(Expressors,  NonExpressors)
+  colnames(contingencyTbl) <- c("Relapse", "No Relapse")
+  
+  stat <- fisher.test(contingencyTbl, alternative = "two.sided")$p.value
+  
+  contingencyTbl <- cbind(contingencyTbl, pvalue=c(NA,stat)) 
+  return(contingencyTbl)
+}
+```
+
+
+```{r}
+reformatFETres <- function(matrix){
+  Expressor.Relapse <- matrix["Expressors",1]
+  Expressor.NoRelapse <- matrix["Expressors",2 ]
+  
+  N.Expressors <- Expressor.Relapse + Expressor.NoRelapse
+  N.NonExpressors <- matrix["NonExpressors",1] + matrix["NonExpressors",2] 
+  
+  Perc.Relapse <- Expressor.Relapse/(Expressor.Relapse + Expressor.NoRelapse) * 100 
+  pval <- matrix["NonExpressors","pvalue"]
+  res <- cbind(N.NonExpressors, N.Expressors, 
+               Expressor.Relapse, Expressor.NoRelapse,
+               Perc.Relapse, pval)
+  
+  return(res)
+} 
+```
+
+
+
+#Read in the normalized counts
+
+```{r}
+counts <- get(load("TARGET_AML_NanostringCounts.RData"))
+```
+
+```{r}
+summary(counts)
+```
+
+#use the geometric mean 
+```{r}
+geomean <- counts$geomean
+
+head(geomean[,1:10])
+```
+
+
+#Clincal data elements
+
+```{r}
+relapseDat <- read.csv("CDEs_WithGroups/Nanostring_pt_clinical_risk_with_RNA_seq_values.csv", stringsAsFactors = FALSE)
+
+head(relapseDat[,1:5])
+```
+
+```{r}
+dim(relapseDat)
+```
+
+```{r}
+USI <- grep("\\.1|^BM", colnames(geomean), invert=TRUE, value=TRUE) 
+relapseDat <- relapseDat[which(relapseDat$USI %in% intersect(relapseDat$USI, USI)), ]
+relapseDat <- relapseDat[which(!duplicated(relapseDat$USI)), ] 
+rownames(relapseDat) <- relapseDat$USI
+
+dim(relapseDat)
+```
+
+```{r}
+relapseInfo <- relapseDat[1:13]
+```
+
+
+#Identify Genes with No expression in remission. 
+
+Question: Does this gene expression, which is found to be high in Dx and absent in remissoion, associate with relapse status?
+
+```{r}
+# genes <- colnames(relapseDat)[15:ncol(relapseDat)]
+genes <- rownames(geomean)
+# genes
+```
+
+```{r}
+remissionUSI <- grep("\\.1", colnames(geomean), value = TRUE)
+expn.EOI <- geomean[, remissionUSI] %>% setNames(., gsub("\\.1", "", colnames(.))) 
+```
+
+
+#Summary Statistics
+
+```{r}
+N.Above20 <- (apply(expn.EOI,1, function(x) sum(x >= 20)))
+sum(N.Above20 > 0)
+sum(N.Above20 > 4)
+```
+
+
+
+```{r}
+percentExpressors <- function(expnMatrix,gene){
+  N <- ncol(expnMatrix)
+  
+  N_expressors <- sum(expnMatrix[gene, ] >= 20)
+  N_nonExpressors <- sum(expnMatrix[gene, ] < 20)
+  Percent_expressors <- N_expressors/N * 100
+  Percent_nonExpressors <- N_nonExpressors/N * 100
+  
+  totals <- cbind(N_nonExpressors, N_expressors,Percent_nonExpressors, Percent_expressors)  %>% set_rownames( . ,gene )
+  
+  return(totals)
+  
+}
+```
+
+```{r}
+percentages <- sapply(genes,percentExpressors, expnMatrix=expn.EOI)
+rownames(percentages) <- c("N_nonExpressors", "N_expressors","Percent_nonExpressors", "Percent_expressors")
+
+dim(percentages)
+```
+
+```{r}
+# quantile(percentages[2,])
+```
+
+for 50% of genes, only ~6.5% of patient remission samples express the genes. 
+
+```{r}
+# range(percentages[1,])
+highPercentage <- percentages[, which(percentages[2,] > 60) ]
+dim(highPercentage)
+```
+
+There are 29 genes that are expressed at greater than 50 counts in 60% of remission samples or more. 
+These will be tested to determine if they relate to relapse occurance, and since they are expressed in a larger percentage of patients,would be good targets. 
+
+```{r}
+# par(las=2)
+# barplot(as.matrix(highPercentage), main="High Percentage of Expressors in Remission Samples", ylab="Percent of Patients", beside = TRUE, col=rainbow_hcl(2))
+```
+
+
+```{r}
+N.ExpnGroups <- melt(percentages[c("N_nonExpressors", "N_expressors"), ]) %>% set_colnames(., c("ExpnGroup", "gene", "N.in.Group"))
+head(N.ExpnGroups)
+```
+
+
+```{r}
+
+```
+
+
+```{r}
+colors <- rainbow_hcl(2)
+# pdf(file="NanostringPanel_NumberOfExpressorsPerGene.pdf")
+ggplot(N.ExpnGroups, aes(x=reorder(N.ExpnGroups$gene, N.ExpnGroups$N.in.Group), y=N.ExpnGroups$N.in.Group, fill=N.ExpnGroups$ExpnGroup)) + 
+  geom_bar(stat="identity") 
+
+  # theme(plot.title = element_text(hjust = 0.5, size = 18),
+  #         panel.background = element_rect(fill="white"),
+  #         panel.grid.major = element_blank(),
+  #         panel.grid.minor = element_blank(),
+  #         panel.border = element_rect(color = "black", fill=NA),
+  #         axis.text.x = element_text(angle = 45,hjust = 1, vjust = 0.5, size = 2.5),
+  #         axis.text.y = element_text(size = 14),
+  #         axis.title = element_text(size = 15))  +
+  #   labs(x="Gene", y="Count", title="Number of Expressors Per Gene:\n Nanostring Panel") +
+  # scale_fill_manual(values=c(N_nonExpressors=colors[2], N_expressors=colors[3]))
+# dev.off()
+```
+
+
+#FET 
+
+```{r}
+clinCorrelates <- lapply(genes, geneExpn_ClinCor,expnMatrix=expn.EOI, clinData=relapseInfo, clinCorr="Relapse.")
+names(clinCorrelates) <- genes
+
+head(clinCorrelates)
+```
+
+
+#Significant Clinical Correlates (kind of)
+                                                                                                 
+```{r}
+sigCor <- list()
+
+for (i in 1:length(clinCorrelates)){
+  gene <- names(clinCorrelates)[i]
+  if (clinCorrelates[[i]][,"pvalue"][2] < 0.1){
+    sigCor[[gene]] <- clinCorrelates[[i]]
+  }
+}
+
+sigCor
+```
+
+
+#Save the FET P-values and Percent Relapse 
+
+```{r}
+reformatFETres(clinCorrelates$ADAMTS2)
+```
+
+```{r}
+NumRelapsed <- as.data.frame(t(sapply(clinCorrelates, reformatFETres)))
+colnames(NumRelapsed) <- c("N.NonExpressors", "N.Expressors", "Expressor.Relapse", "Expressor.NoRelapse","Perc.Relapse", "pval")
+head(NumRelapsed)
+```
+
+```{r}
+# write.csv(NumRelapsed, "TARGET_AML_NanostringPanel_NumberRelapsed_PatientsGreater50counts_28June2017.csv")
+```
+
+#Examine Genes with High Percent of Relapse 
+
+```{r}
+HighPercentRelapse <- subset(NumRelapsed, N.Expressors > 4) #117 genes meet this criteria
+HighPercentRelapse <- HighPercentRelapse[order(-HighPercentRelapse$Perc.Relapse,HighPercentRelapse$pval), ]
+HighPercentRelapse$Gene <- rownames(HighPercentRelapse)
+head(HighPercentRelapse)
+```
+
+```{r}
+theme_JS %<a-% { theme(plot.title = element_text(hjust = 0.5, size = 18),
+          panel.background = element_rect(fill="white"),
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          panel.border = element_rect(color = "black", fill=NA),
+          axis.text.x = element_text(angle = 20,hjust = 1, vjust = 0.5, size = 8),
+          axis.text.y = element_text(size = 14),
+          axis.title = element_text(size = 14),
+          legend.position = "none")
+}
+```
+
+```{r}
+pdf(file="NanostringPanel_GenesWithHighestPercentRelapsing_countsGreater20.pdf", width = 7, height = 5)
+HighPercentRelapse <- HighPercentRelapse[1:20,]
+ggplot(HighPercentRelapse,
+       aes(x=reorder(HighPercentRelapse$Gene, HighPercentRelapse$Perc.Relapse), y=Perc.Relapse, fill=Gene)) + 
+  geom_bar(stat="identity") + 
+  labs(title="Genes with Highest Percentage Relapsing:\n Nanostring Panel", x="", y="Percent") +
+  lims(y=c(0,100)) + scale_fill_manual(values = rainbow_hcl(20)) + 
+  geom_text(aes(x=reorder(HighPercentRelapse$Gene, HighPercentRelapse$Perc.Relapse), y=Perc.Relapse), 
+            label=paste(HighPercentRelapse$Expressor.Relapse, HighPercentRelapse$N.Expressors, sep="/"),
+            vjust=-0.2, size=3) +
+  theme_JS
+dev.off()
+# getwd()
+```
+
+
+
+
+#Examples of dplyR for future use
+
+```{r}
+library(lazyeval)
+t <- relapseDat[which(relapseDat[,"TPSD1"] > 20), ]
+
+criteria <- interp(~ col > 20, col=as.symbol("TPSD1"))
+
+# relapseDat %>% dplyr::filter(TPSD1 > 20) #works because you enter the colum  n name
+# relapseDat %>% dplyr::filter("TPSD1" > 20) #does not bc char vector
+# relapseDat %>% dplyr::filter_(.dots=criteria) #works with lazyeval interp function
+```
+
+```{r}
+table <- xtable(t, digits=0)
+# print(table,comment = FALSE)
+```
+
+```{r}
+dates = "R_dates"
+group = "grp_region"
+column = "z_valuation"
+filter_criteria = interp(~(!is.na(var)), var = as.name(group))
+```
+
+```{r}
+# https://stackoverflow.com/questions/31760134/using-filter-in-dplyr-where-both-field-and-value-are-in-variables
+ library(lazyeval)
+ library(dplyr)
+df <- data.frame(V=c(6, 1, 5, 3, 2), Unhappy=c("N", "Y", "Y", "Y", "N"))
+fld <- "Unhappy"
+sval <- "Y"
+
+ df %>%
+     filter_(interp(~v==sval, v=as.name(fld)))
+```    
+
+```{r}
+# https://stackoverflow.com/questions/21208801/group-by-multiple-columns-in-dplyr-using-string-vector-input
+library(dplyr)
+
+df <-  data.frame(
+    asihckhdoydk = sample(LETTERS[1:3], 100, replace=TRUE),
+    a30mvxigxkgh = sample(LETTERS[1:3], 100, replace=TRUE),
+    value = rnorm(100)
+)
+
+# Columns you want to group by
+grp_cols <- names(df)[-3]
+
+# Convert character vector to list of symbols
+dots <- lapply(grp_cols, as.symbol)
+
+# Perform frequency counts
+df %>%
+    group_by_(.dots=dots) %>%
+    summarise(n = n())
+```
+
+
+
+
+
+
+

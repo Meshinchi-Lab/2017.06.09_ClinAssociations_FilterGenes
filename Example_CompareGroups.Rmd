@@ -1,0 +1,483 @@
+---
+title: "CompareGroups_Examples.Rmd"
+author: "Jenny Smith"
+date: "August 30, 2017"
+output: html_document
+---
+
+
+```{r setup}
+library(knitr)
+knitr::opts_chunk$set(tidy.opts=list(width.cutoff=50),tidy=TRUE, fig.align='center', fig.height = 4, fig.width = 6)
+knitr::opts_knit$set(root.dir = "~/Nanostring_Analysis/2017.06.09_ClinAssociations_FilterGenes/")
+```
+
+
+```{r message = FALSE, warning=FALSE}
+library(RColorBrewer)
+library(colorspace)
+library(stringr)
+library(ggplot2)
+library(GGally)
+library(gridExtra)
+library(grid)
+library(magrittr)
+library(compareGroups)
+library(pryr)
+library(ggpubr)
+getwd()
+```
+
+```{r}
+source("~/scripts/RNAseq_Analysis/DifferentialExpn_PathwayAnalysis/clusterAnalysis_Function.r")
+source("~/scripts/ConversionScripts/Merge_Cat_FixDupIDs_Function.r")
+source("~/scripts/RNAseq_Analysis/DifferentialExpn_PathwayAnalysis/Heatmaps_Function.r")
+source("~/scripts/Survival_Analysis/Survplot_Functions_2017.03.31.r")
+source("~/scripts/RNAseq_Analysis/DifferentialExpn_PathwayAnalysis/ggplot_Themes_Function.r")
+```
+
+#Read in the Clinical Data 
+```{r}
+anno <- read.csv("~/Nanostring_Analysis/2017.05.04_DataExploration/NanostringAnnotations_04May2017.csv", stringsAsFactors = FALSE)
+anno$DX_Induction <- ifelse(anno$DX_Induction == "Induction", "EOI", anno$DX_Induction )
+
+clinData <- read.csv("~/reference_mapping-files/TARGET_AML_current_asof_june30_2016_UPDATED_RhondaEdit_2017.06.08.csv", stringsAsFactors = FALSE, row.names = 1)
+
+relapseData <- read.csv("~/Nanostring_Analysis/2017.06.09_ClinAssociations_FilterGenes/CDEs_WithGroups/Nanostring_pt_clinical_risk_with_RNA_seq_values.csv",
+                        stringsAsFactors = FALSE)
+
+survData <- get(load("~/RNA_seq_Analysis/2017.02.28_LSC17_Score/TARGET/TARGET_AML_LSC17_HighDepthandLowDepth_SurvivalData.RData"))
+```
+
+```{r}
+head(relapseData)
+relapseData <- relapseData[,c(1:14)]
+```
+
+```{r}
+dup <- which(duplicated(relapseData$USI))
+relapseData <- relapseData[-51, ]
+rownames(relapseData) <- relapseData$USI
+```
+
+
+#Read in the Nanostring Normalized Counts
+```{r}
+counts <- get(load("TARGET_AML_NanostringCounts.RData"))
+
+norm <- counts$geomean
+```
+
+```{r}
+USI <- grep("BM|.1", colnames(norm), value = TRUE, invert = TRUE)
+```
+
+
+#Clinical Characterisitcs
+
+```{r}
+clinData <- clinData[USI, ]
+```
+
+```{r}
+LSC17Info <- survData$LD[USI,c("LSC17_Group", "LSC17_Quantile")]
+dim(LSC17Info)
+```
+
+```{r}
+merge_clinData <- merge(clinData, relapseData, by.x=0, by.y=0)
+merge_clinData$Age.in.years <- merge_clinData$Age.at.Diagnosis.in.Days/365
+rownames(merge_clinData) <- merge_clinData$Row.names
+
+merge_clinData <- merge(merge_clinData, LSC17Info, by.x = 0, by.y=0)
+dim(merge_clinData)
+```
+
+```{r}
+rownames(merge_clinData) <- merge_clinData$Row.names
+# colnames(merge_clinData)
+```
+
+```{r}
+merge_clinData$Bone.marrow.leukemic.blast.percentage.... <- ifelse(merge_clinData$Bone.marrow.leukemic.blast.percentage.... == ".", NA, merge_clinData$Bone.marrow.leukemic.blast.percentage....)
+merge_clinData$Bone.marrow.leukemic.blast.percentage.... <- as.numeric(as.character(merge_clinData$Bone.marrow.leukemic.blast.percentage....))
+
+
+merge_clinData$MRD....EOI2 <- ifelse(merge_clinData$MRD....EOI2 == "N/A", NA, merge_clinData$MRD....EOI2 )
+merge_clinData$MRD....EOI2 <- as.numeric(as.character(merge_clinData$MRD....EOI2))
+```
+
+```{r}
+merge_clinData$Event.ID <- ifelse(merge_clinData$First.Event.y == "Censored", 0, 1)
+merge_clinData$OS.ID <- ifelse(merge_clinData$Vital.Status == "Alive", 0, 1)
+merge_clinData$timeToEvent <- with(merge_clinData, Surv(Event.Free.Survival.Time.in.Days, Event.ID))
+merge_clinData$timeToDeath <- with(merge_clinData, Surv(Overall.Survival.Time.in.Days, OS.ID))
+```
+
+```{r}
+# MRD.Relapse <- function(clinData){
+#   if (all(merge_clinData$MRD. == "yes" & merge_clinData$CR.EOI2 == "yes")) {
+#     "MRD.CR"
+#     }else if {"no"}
+# }
+# MRD.Relapse
+```
+
+
+#ggstrip plot Example
+
+```{r}
+library(ggpubr)    
+# stripplot <- ggstripchart(cts,
+    #            x="Group",
+    #            y="Norm.Count",
+    #            color = "Group",
+    #         ylab="Log2 Normalized Counts",
+    #         jitter = 0.2,
+    #         size = 3,
+    #         add="median_iqr",
+    #         add.params = list(color="gray")) +
+    #   geom_line(data=cts[idx,], aes(group=USI), position = position_jitter(width=0.1,height = 0.1)) +
+    #   scale_color_manual(values = colorCodes) +
+    #   labs(title=title) + theme_JS +
+    #   geom_text(aes(x=3, y=ypos),
+    #           label=lab,size=4.5, data = data.frame(ypos=ypos))
+```
+
+
+
+
+
+#Notes on Statistical Tests Used in CompareGroups()
+
+```{r warning=FALSE}
+#Categroical, binary response groups for all genes
+#Can use the time to event as the response variable
+r1 <- compareGroups(AIF1L ~ LSC17_Group + MRD. + Relapse.+ CR.EOI1 +
+                    MRD....EOI1 +  MRD....EOI2 + timeToEvent,
+                    data = clinData_highExp,method=4, Q1=0, Q3=1,ref=c(Relapse.=1), 
+                    ref.y=2) #perform Kruskal-WallisTest
+t1 <- createTable(r1, show.ratio = TRUE)
+pVals <- getResults(t1, "p.overall") #Select the pValues. 
+t1
+```
+
+Summaryize: 
+
+for every unit increase in MRD in EOI1, then there is 15% increase odds that you will express AIF1L aboveMaxBM levels. AIF1L is response variable and MRD is explanatory variable. 
+
+Note: MRD yes or no, is if MRD > 0.0%. MRD is the percentage of detectable blast cells. 
+
+when time to event is included as an explanatory vairable, its described by the probability of the event occuring, computed with KM estimates. 
+
+```{r}
+plot(r1, bivar=TRUE)
+```
+
+
+```{r}
+#5 year survival time. No Difference. 
+createTable(compareGroups(AIF1L ~ timeToEvent, data = clinData_highExp, timemax=c(timeToEvent=1825)))
+```
+
+For AIF1L, this provides the N in the group and the % of patients who had an event in that group. 
+
+When a timetoevent (Surv class) is used as the explanatory variable, this shows that the probabilty for an event is 70% for the similarto BM for NRIP3. So maybe not a good target... 
+
+
+-------Warnings from Chisq  -------------
+NOTE: Warning occurs automatically due to the chisq.test base function. The p-value reported is however, from the FET. http://www.comparegroups.eu/forum
+"oic...@gmail.com 	
+4/9/15
+Hello, 
+I wonder if the Fisher exact test is automatically launched when the next warning appears: 
+Aviso en chisq.test(xx, correct = correction) : 
+ Chi-squared approximation may be incorrect 
+If not, what may I do?
+
+Isaac Subirana 	
+
+4/10/15
+compareGroups function automatically performs Fisher exact test when some cells have an expected frequency lower than 5. Every time a categorical variable is compared between groups, compareGroups first computes a chisq test. That's why a warnign appears when expected frequencies are <5. However, the p-value finally reported are the ones obtained by Fisher exact test.
+Regards,"
+-----------------------------
+
+By default OR and HR for continous variable is calculated for every unit increase. 
+bydefault all reference categories are the first - so AboveMaxBM would be referene unless explicitly set with  ref.y
+
+Now, changing ref.y to similarTo BM (who we consider having "normal expression of this gene"), we can see that the OR of having "yes" MRD for "AboveMaxBM" AIF1L is 4.84 times more likely.  Also, the OR of MRD (for 1 unit increase) is 1.15x higher for AboveMaxBM. 
+
+Also the OR of being in LSC17 high is 3.04 times more likely (NOT Significant though)
+
+
+```{r}
+r2 <- compareGroups(timeToEvent ~ AIF1L + KRT17, 
+                    data=clinData_highExp, 
+                    ref=c(AIF1L=2, KRT17=2),
+                    ref.y=1)
+createTable(r2, show.ratio = TRUE) #No difference. This should be the approx same for all genes included here.
+```
+
+```{r}
+# summary(r2)
+```
+
+This shows, as above with the poorly formatted Cox models from SurvObjects() function, thre is no significance and the referecne here is No event to Event (death or relapse), and reference was set to similarToBM. Though the HR is increased for the AboveMaxBM, it is not significant. Still, possibly informative? 
+
+This was logrank test. Checked on PH assumption above, and none of the genes groupings violate PH assumptions. 
+
+```{r}
+plot(compareGroups(timeToEvent ~ AIF1L, 
+                    data=clinData_highExp, 
+                    ref=c(AIF1L=2), ref.y=2), bivar=TRUE)
+```
+
+
+#How to extract the descriptives from the create table()
+```{r}
+r <- compareGroups(clinData_highExp[,"ARC"] ~ clinData_highExp$MRD....EOI1 +
+                       clinData_highExp$MRD....EOI2, method=4, ref.y=2)
+
+t <- createTable(r, show.ratio = TRUE)
+
+t$descr
+```
+
+
+#Compare Results with Reference Groups Changed 
+```{r}
+r3 <- compareGroups(clinData_highExp[,"AIF1L"] ~ clinData_highExp$MRD....EOI1 + 
+                      clinData_highExp$MRD....EOI2, method=4,compute.ratio=TRUE,
+                    ref.y=2) 
+t3 <- createTable(r3, show.ratio = TRUE)
+
+t3
+```
+
+```{r}
+r4 <- compareGroups(clinData_highExp[,"AIF1L"] ~ clinData_highExp$MRD....EOI1 + 
+                      clinData_highExp$MRD....EOI2,method=1,ref.y=1) 
+t4 <- createTable(r4, show.ratio = TRUE)
+t4
+```
+
+
+#Example Data 
+
+```{r}
+# load REGICOR data
+data(regicor)
+
+# head(regicor)
+
+# compute a time-to-cardiovascular event variable
+regicor$tcv <- with(regicor, Surv(tocv, as.integer(cv=='Yes')))
+label(regicor$tcv)<-"Cardiovascular"
+
+# compute a time-to-overall death variable
+regicor$tdeath <- with(regicor, Surv(todeath, as.integer(death=='Yes')))
+label(regicor$tdeath) <- "Mortality"
+
+# descriptives by sex
+res <- compareGroups(sex ~ .-id-tocv-cv-todeath-death,method=4, ref.y=2,data = regicor)
+res
+# res <- compareGroups(sex ~ ., data = regicor)
+
+# summary of each variable
+# summary(res)
+
+createTable(res)
+```
+
+
+```{r}
+getResults(res, what="ratio")
+```
+
+```{r}
+createTable(res, show.ratio = TRUE)
+```
+
+```{r}
+plot(res)
+```
+
+```{r}
+require(compareGroups)
+data(regicor)
+res<-compareGroups(sex ~ . ,regicor,method=c(triglyc=2))
+# retrieve descriptives
+# getResults(res)
+# retrieve OR and their corresponding p-values
+# getResults(res,what="ratio")
+createTable(res)
+```
+
+```{r}
+CDE_byGroup <- CDE_table <- merge_clinData[, c("AIF1L", "CR.EOI1" ,
+          "Event.Free.Survival.Time.in.Days",
+          "Overall.Survival.Time.in.Days",
+          "CR.EOI2" ,
+          "MRD....EOI1" ,
+          "MRD....EOI2"  ,
+          "Relapse." ,
+          "LSC17_Group" , 
+          "LSC17_Quantile",
+          "timeToDeath",
+          "timeToEvent")]
+
+resAIF1L <- compareGroups(AIF1L ~ ., CDE_byGroup, method=4)
+
+createTable(resAIF1L)
+```
+
+
+
+```{r warning=FALSE}
+gene <- ExpnGroups[1]
+CR <- c("CR.EOI1", "CR.EOI2")
+# tempDat <- merge_clinData[which(merge_clinData$CR.EOI2 != "Unevaluable"), ]
+
+form <- as.formula(paste(gene, paste(CR, collapse = "+"), sep="~"))
+# 
+# CR.tab <- createTable(compareGroups(form,
+#               data=merge_clinData, ref.y=2, simplify=TRUE),
+#               hide.no = "No", 
+#               hide = c( CR.EOI1="CR", CR.EOI2="CR"),
+#             show.ratio = TRUE)
+
+CR.tab <- createTable(compareGroups(form,
+              data=merge_clinData, ref.y=2, simplify=TRUE),
+              show.ratio = TRUE)
+
+CR.tab
+```
+
+
+```{r}
+NotCR <- CR.tab$descr[c("CR.EOI1: Not in CR", "CR.EOI2: Not in CR"), ]
+NotCR
+
+
+N <- CR.tab$avail[,c("AboveMaxBM", "similarToBM")] %>% set_colnames(., c("AboveMaxBM.Total", "similarToBM.Total"))
+
+t <- cbind(N,rownames(NotCR))
+
+# cbind(t, NotCR)
+```
+
+```{r}
+# ggboxplot(CountsBy.EOI.Group$PRAME, x="Group", y="Norm.Count", color = "Group", 
+#           ylab="Log2 Normalized Counts", add = "jitter", 
+#           add.params = list(jitter=0.2, size=0.5),
+#           label = "Group",
+#           label.select = paste("N =", c(N.Abv, N.Sim, N.BM))) +
+#   scale_color_manual(values = colorCodes) 
+```
+
+
+
+#Hox genes?
+
+
+```{r}
+hox.genes <- colnames(clinData_highExp)[119:124]
+
+hox.clindata <- clinData_highExp[,c(1:100,119:124)] 
+
+# hox.clindata[order(hox.clindata$HOXA11, hox.clindata$HOXA4, hox.clindata$),100:102]
+
+```
+ 
+```{r}
+cytoHox <- list()
+for (cytogroup in unique(clinData_highExp$Primary.Cytogenetic.Code)){
+  t <- clinData_highExp[clinData_highExp$Primary.Cytogenetic.Code == cytogroup, ]
+  # HOXA11 <- HOXA4 <- HOXA6 <- HOXB6 <- HOXB9 <- NULL
+  hoxes <- list()
+  for (hox in hox.genes){
+    t2 <- ifelse(t[,hox] == "AboveMaxBM", 1,0) %>% set_names(., rownames(t))
+    hoxes[[hox]] <- t2
+  }
+  names(hoxes) <- hox.genes
+  cytoHox[[cytogroup]] <- hoxes
+}
+
+```
+
+
+
+```{r}
+# lapply(cytoHox, function(x) sapply(x, sum)) # predominantly in the Other and Normal Cytogroups
+
+# lapply(names(cytoHox$Other), function(x) merge ())
+# Reduce(function(x,y) transform(merge(x,y, by.x=0, by.y=0), row.names=Row.names, Row.names=NULL), cytoHox$Other)
+```
+
+```{r}
+# hox.other <- Reduce(function(x,y) transform(merge(x,y, by.x=0, by.y=0), row.names=Row.names, Row.names=NULL), cytoHox$Other)
+
+hox.member <- lapply(cytoHox, function(list) Reduce(function(x,y) transform(merge(x,y, by.x=0, by.y=0), row.names=Row.names, Row.names=NULL), list))
+
+hox.member <- lapply(hox.member, function(x) set_colnames(x, hox.genes))
+```
+
+```{r}
+num.hox <- lapply(hox.member, function(x) which(apply(x, 1, sum) >= 3))
+
+mutations <- lapply(num.hox, function(x) clinData[names(x), c("Known.Fusions", "Reason","NPM.mutation",
+                                                              "WT1.mutation")])
+
+
+ 
+mutations$`t(8;21)`
+
+```
+
+```{r}
+mutations$Normal
+```
+
+
+#NMF Clustering
+
+```{r}
+library(NMF)
+options(scipen = 999)
+
+
+EOI <- EOI %>% set_rownames(., .$X) %>% .[,-(1:2)]
+EOI.t <- t(EOI) %>% set_colnames(., gsub("\\.1", "", colnames(.)))
+
+
+
+res1 <- nmf(EOI, 3, method="brunet")
+fit(res1)
+w <- basis(res1) %>% set_colnames(., paste0("factor",1:3))
+h <- coef(res1)
+
+#features == rows, samples == columns
+f.score <- featureScore(res1)
+summary(f.score)
+
+e.features <- extractFeatures(res1)
+str(e.features) #All NA?
+
+
+```
+
+```{r}
+predict(res1, what="columns") #Cluster members 
+```
+
+```{r}
+consensusmap(res1, annCol=clinData[colnames(EOI), "Primary.Cytogenetic.Code"])
+
+consensusmap(res1) #looks odd
+
+```
+
+```{r}
+estim.r <- nmf(EOI, 2:5, method="brunet") #not enough memory 
+
+```

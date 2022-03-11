@@ -1,0 +1,836 @@
+---
+title: "Nanostring Clinical Correlates: Filtered Genes"
+author: "Jenny Smith"
+date: "June 9, 2017"
+output: html_document
+---
+
+
+
+```{r setup}
+library(knitr)
+knitr::opts_chunk$set(tidy.opts=list(width.cutoff=50),tidy=TRUE, fig.align='center', fig.height = 4, fig.width = 6)
+knitr::opts_knit$set(root.dir = "/fh/fast/meshinchi_s/workingDir/TARGET/AML_TARGET/RNA/Nanostring/analysis/2017.06.09_ClinAssociations_FilterGenes/")
+```
+
+
+```{r message = FALSE, warning=FALSE}
+library(RColorBrewer)
+library(colorspace)
+library(stringr)
+library(ggplot2)
+library(GGally)
+library(gridExtra)
+library(grid)
+library(magrittr)
+library(compareGroups)
+library(pryr)
+library(ggpubr)
+library(dplyr)
+getwd()
+```
+
+```{r}
+source("~/scripts/RNAseq_Analysis/DifferentialExpn_PathwayAnalysis/clusterAnalysis_Function.r")
+source("~/scripts/ConversionScripts/Merge_Cat_FixDupIDs_Function.r")
+source("~/scripts/RNAseq_Analysis/DifferentialExpn_PathwayAnalysis/Heatmaps_Function.r")
+source("~/scripts/Survival_Analysis/Survplot_Functions_2017.03.31.r")
+source("~/scripts/RNAseq_Analysis/DifferentialExpn_PathwayAnalysis/ggplot_Themes_Function.r")
+```
+
+#Read in the Clinical Data 
+```{r}
+anno <- read.csv("~/Nanostring_Analysis/2017.05.04_DataExploration/NanostringAnnotations_04May2017.csv", stringsAsFactors = FALSE)
+anno$DX_Induction <- ifelse(anno$DX_Induction == "Induction", "EOI", anno$DX_Induction )
+
+clinData <- read.csv("~/reference_mapping-files/TARGET_AML_current_asof_june30_2016_UPDATED_CLEAN_4.19.18.csv", stringsAsFactors = FALSE, row.names = 1)
+
+relapseData <- read.csv("~/Nanostring_Analysis/2017.06.09_ClinAssociations_FilterGenes/CDEs_WithGroups/Nanostring_pt_clinical_risk_with_RNA_seq_values.csv",
+                        stringsAsFactors = FALSE)
+
+# survData <- get(load("~/RNA_seq_Analysis/2017.02.28_LSC17_Score/TARGET/TARGET_AML_LSC17_HighDepthandLowDepth_SurvivalData.RData"))
+```
+
+```{r}
+head(relapseData)
+relapseData <- relapseData[,c(1:5)]
+```
+
+```{r}
+dup <- which(duplicated(relapseData$USI))
+relapseData <- relapseData[-51, ]
+rownames(relapseData) <- relapseData$USI
+```
+
+
+#Read in the Nanostring Normalized Counts
+
+```{r}
+counts <- get(load("TARGET_AML_NanostringCounts.RData"))
+
+norm <- counts$geomean
+```
+
+```{r}
+USI <- grep("BM|.1", colnames(norm), value = TRUE, invert = TRUE)
+```
+
+
+#Clinical Characterisitcs Table
+
+```{r}
+clinData <- clinData[USI, ]
+```
+
+```{r}
+LSC17Info <- survData$LD[USI,c("LSC17_Group", "LSC17_Quantile")]
+dim(LSC17Info)
+```
+
+```{r warning=FALSE}
+merge_clinData <- inner_join(clinData, relapseData, by = 0)
+
+
+merge_clinData <- merge(clinData, relapseData[,1:13], by.x=0, by.y=0)
+
+
+
+merge_clinData$Age.in.years <- merge_clinData$Age.at.Diagnosis.in.Days/365
+rownames(merge_clinData) <- merge_clinData$Row.names
+
+merge_clinData <- merge(merge_clinData, LSC17Info, by.x = 0, by.y=0)
+dim(merge_clinData)
+```
+
+```{r}
+rownames(merge_clinData) <- merge_clinData$Row.names
+# colnames(merge_clinData)
+```
+
+```{r}
+merge_clinData$Bone.marrow.leukemic.blast.percentage.... <- ifelse(merge_clinData$Bone.marrow.leukemic.blast.percentage.... == ".", NA, merge_clinData$Bone.marrow.leukemic.blast.percentage....)
+merge_clinData$Bone.marrow.leukemic.blast.percentage.... <- as.numeric(as.character(merge_clinData$Bone.marrow.leukemic.blast.percentage....))
+
+
+merge_clinData$MRD...at.end.of.course.2 <- ifelse(merge_clinData$MRD....EOI2 == "N/A", NA, merge_clinData$MRD....EOI2 )
+merge_clinData$MRD....EOI2 <- as.numeric(as.character(merge_clinData$MRD....EOI2))
+```
+
+```{r}
+merge_clinData$Event.ID <- ifelse(merge_clinData$First.Event.y == "Censored", 0, 1)
+merge_clinData$OS.ID <- ifelse(merge_clinData$Vital.Status == "Alive", 0, 1)
+merge_clinData$timeToEvent <- with(merge_clinData, Surv(Event.Free.Survival.Time.in.Days, Event.ID))
+merge_clinData$timeToDeath <- with(merge_clinData, Surv(Overall.Survival.Time.in.Days, OS.ID))
+```
+
+```{r}
+# MRD.Relapse <- function(clinData){
+#   if (all(merge_clinData$MRD. == "yes" & merge_clinData$CR.EOI2 == "yes")) {
+#     "MRD.CR"
+#     }else if {"no"}
+# }
+# MRD.Relapse
+```
+
+
+```{r}
+# write.csv(merge_clinData, "TARGET_AML_NanostringPanel_Clean_CDE.csv", row.names = FALSE)
+```
+
+
+#Table with All Patients Included in the Experiment 
+```{r}
+CDE_table <- merge_clinData[, c("Gender",
+          "Age.in.years",
+          "Post.Dx.Sample.used",
+          "WBC.at.Diagnosis" ,
+          "Bone.marrow.leukemic.blast.percentage...." ,
+          "MLL" ,
+          "inv.16." ,
+          "t.8.21." , 
+          "NPM.mutation" , 
+          "WT1.mutation" ,  
+          "FLT3.ITD.positive." , 
+          "Risk.group" , 
+          "CR.EOI1" , 
+          "CR.EOI2" ,
+          "MRD....EOI1" ,
+          "MRD....EOI2"  ,
+          "Relapse." ,
+          "LSC17_Group" , 
+          "LSC17_Quantile")]
+
+rownames(CDE_table) <- rownames(merge_clinData)
+```
+
+```{r}
+# CDE_table$MRD....EOI1 #check that this from flow cytometry
+# CDE_table$MRD....EOI2
+```
+
+```{r}
+comp <- compareGroups(CDE_table, method = 4)
+```
+
+```{r}
+tab <- createTable(comp)
+
+tab
+```
+
+```{r}
+# export2latex(tab, file="TARGET_AML_Nanostring_ClincalChars_Table.tex")
+```
+
+```{r}
+# export2csv(tab, file="TARGET_AML_NanostringPanel_ClinicalCharacteristics_Table.csv")
+```
+
+
+#Associate Groups of High EOI expressors with CDE
+
+How Genes were Filtered:
+Using nSolver Normalized gene expression 
+1. Correlation (pearson R) with TPM > 0.7
+2. Max Expression of gene in Normal BM < 20
+3. FC > 2, and adj. P-value < 0.05 in DX vs BM differntial expression 
+4. Expression of gene in DX group > 50 for 5% of Samples. 
+5. Expression AboveMaxBM is when gene expression > maxBM AND > 20 counts (eg detectable)
+
+```{r}
+highExp <- get(load("~/Nanostring_Analysis/2017.06.08_NormalizationMethods/TARGET_AML_NanostringPanel_62genes_highExpressors_16June2017.RData"))
+head(highExp[,1:5])
+```
+
+
+```{r}
+factorLevels <- sapply(highExp, levels)
+keep <- which(sapply(factorLevels, length) == 2) #added new filter
+
+highExp <- highExp[, names(keep)]
+```
+
+```{r}
+ExpnGroups <- colnames(highExp)
+```
+
+How Genes were Filtered:
+Using nSolver Normalized gene expression 
+1. Correlation (pearson R) with TPM > 0.7
+2. Max Expression of gene in Normal BM < 20
+3. FC > 2, and adj. P-value < 0.05 in DX vs BM differntial expression 
+4. Expression of gene in DX group > 50 for 5% of Samples.  
+5. Expression of gene in EOI > 50 for 5% of AML Samples
+
+```{r}
+highExp.refined <- get(load("~/Nanostring_Analysis/2017.06.08_NormalizationMethods/TARGET_AML_NanostringPanel_28genes_highExpressors_16June2017.RData"))
+```
+
+```{r}
+head(highExp.refined)
+```
+
+```{r}
+sapply(highExp.refined, levels)
+```
+
+```{r}
+ExpnGroups.refined <- colnames(highExp.refined)
+```
+
+#Merge Groups Information with Clinical Data
+
+```{r}
+#Some repeat columns after multiple merges
+identical(merge_clinData$First.Event.x, merge_clinData$First.Event.y)
+#but they are identical 
+```
+
+```{r warning=FALSE}
+clinData_highExp <- merge(merge_clinData, highExp, by.x=0, by.y = 0)
+
+rownames(clinData_highExp) <- merge_clinData$Row.names
+
+head(clinData_highExp[,c(4,101:102)])
+```
+
+```{r}
+save(clinData_highExp, file="TARGET_AML_NanostringPanel_CDEs_HighExpressorGroups_16June2017.RData")
+write.csv(clinData_highExp,"TARGET_AML_NanostringPanel_CDEs_HighExpressorGroups16June2017.csv" )
+```
+
+```{r message=FALSE, warning=FALSE}
+clinData_refinfed <- merge(merge_clinData, highExp.refined, by.x=0, by.y = 0)
+rownames(clinData_refinfed) <- clinData_refinfed$Row.names
+
+head(clinData_refinfed[,c(4,101:103)])
+```
+
+```{r}
+# write.csv(clinData_refinfed, "TARGET_AML_NanostringPanel_CDEs_HighExpressorGroups_28Genes_16June2017.csv")
+```
+
+
+#Distribution of Expression by EOI defined groups
+
+```{r}
+AboveMaxBM.plot <- function(countsByGroup, clinData, gene,plot=TRUE){
+  #countsbyGroup has patient USI as column X (was rownames, will fix), and genes as column names
+  #countsbyGroup has group status in column labeled "Status" (eg EOI,BM)
+  #clinData contains the groups as a factor column defined by EOI exprn levels, eg AboveMaxBM, with genes as columns. 
+  #gene is the column name of interest (eg ALOX12)
+  library(ggpubr)
+  library(magrittr)
+  library(ggplot2)
+  library(colorspace)
+  
+
+  colors <- rainbow(3, s=0.5,v=0.85, start=0.5, end=0.8) #DX, EOI, BM colors
+  colors2 <- rainbow_hcl(2) #aboveMAXBM colors
+  colorCodes <- c(BM=colors[1], similarToBM=colors2[2],AboveMaxBM=colors[3],DX=colors[2]) 
+  title <- paste("Expresson of", gene, ": End of Induction")
+
+  
+  EOI <- subset(countsByGroup, Status == "EOI")
+  BM <- subset(countsByGroup, Status == "BM")
+  DX <- subset(countsByGroup, Status == "DX")
+  
+  cols <- c("USI", "Group", "Norm.Count")
+  cts.EOI <- EOI[,gene] %>% set_names(gsub("\\.1", "", EOI$X))
+  cts.EOI <- merge(clinData[,gene], cts.EOI, by.x=0, by.y=0) %>% 
+    set_colnames(.,cols )
+  cts.BM <- data.frame(BM$X, as.factor(BM$Status), BM[,gene]) %>% 
+    set_colnames(., cols)
+  cts.DX <- data.frame(DX$X, as.factor(DX$Status), DX[,gene]) %>% 
+    set_colnames(., cols)
+  
+  cts <- do.call(what=rbind, args = list(cts.DX,cts.EOI, cts.BM))
+  cts$USI <- as.character(cts$USI)
+  cts$Norm.Count <- log2(cts$Norm.Count + 1)
+    
+  if (plot == TRUE){
+    N.Abv <- sum(cts$Group == "AboveMaxBM")
+    N.Sim <-sum(cts$Group == "similarToBM")
+    N.BM <- sum(cts$Group == "BM")
+    
+    lab <- paste("N", c("Expr", "NonExpr", "BM"),"=", c(N.Abv, N.Sim, N.BM),
+                          sep=" ", collapse = "\n")
+    ypos <- (max(cts$Norm.Count)-1)
+    ylim <- (max(cts$Norm.Count)+0.5)
+    # print(ylim)
+    
+    #paired DX and EOI expression for aboveMaxBM only
+    names <- cts[cts$Group == "AboveMaxBM", "USI"]
+    idx <- which(cts$USI %in% names)
+    
+    #Jitter the data points manually
+    set.seed(1)
+    jitter.cts <- cts
+    # jitter.cts$Norm.Count <- jitter(jitter.tmp$Norm.Count, factor=0.2)
+    jitter.cts$xaxis <- jitter(as.numeric(jitter.cts$Group),factor=1.5)
+
+    
+    p <- ggplot(jitter.cts, aes(x=xaxis, y=Norm.Count, color=Group)) + 
+                  geom_point(size=4) + 
+                  geom_line(data=jitter.cts[idx,], aes(group=USI), color="yellow", size=0.5) +
+                  scale_y_continuous(limits = c(0,ylim), breaks = seq(0,ylim,by=2.5)) +
+                  scale_x_continuous(breaks = seq(1,4,by=1), 
+                                     labels = c("DX", "Expressor\nEOI", "NonExpressor\nEOI", "BM")) +
+                  scale_color_manual(values = colorCodes) +
+                  labs(title=title) + 
+                  theme_JS +
+                  
+                  geom_text(aes(x=3, y=ypos), label=lab,size=4.5,
+                            data = data.frame(ypos=ypos), inherit.aes = FALSE)
+                
+
+    return(p)
+  }else if (plot == FALSE){
+    return(cts)
+  }
+
+}
+```
+
+
+
+```{r}
+countsByGroup <- read.csv("TARGET_AML_NanostringPanel_GeomeanNormalizedCounts_GenesasColumns_withGroups.csv", stringsAsFactors = FALSE)
+countsByGroup$Status <- ifelse(countsByGroup$Status == "Induction", "EOI", countsByGroup$Status) 
+head(countsByGroup[,1:5])
+```
+
+
+```{r fig.height=7, fig.width=8}
+stripplots <- lapply(ExpnGroups, AboveMaxBM.plot, countsByGroup=countsByGroup, clinData=clinData_highExp)
+names(stripplots) <- ExpnGroups
+
+stripplots$PRAME
+stripplots$MSLN
+stripplots$HOXB6
+```
+
+
+```{r}
+path <- paste(getwd(), "stripplots_withDX", sep="/")
+# dir.create(path)
+# invisible(lapply(names(stripplots), function(x) ggsave(filename=paste(path, paste0(x,"_stripplot.pdf"), sep="/"), plot = stripplots[[x]], device = "pdf", width=7, height = 5, units="in")))
+```
+
+
+```{r}
+CountsBy.EOI.Group <- lapply(ExpnGroups, AboveMaxBM.plot, countsByGroup = countsByGroup, clinData = clinData_highExp,plot=FALSE) 
+names(CountsBy.EOI.Group) <- ExpnGroups
+head(CountsBy.EOI.Group)
+```
+
+
+
+#Plot MRD Positive and Negative Cohorts.
+
+```{r}
+MRD.pos <- clinData_highExp[clinData_highExp$MRD. == "yes", "TARGET.USI.1"]
+MRD.neg <- clinData_highExp[clinData_highExp$MRD. == "no", "TARGET.USI.1"]
+```
+
+
+
+
+#KM Estimates- Are there differences in EFS?
+
+```{r warning=FALSE, message=FALSE}
+#EFS
+survList.EFS <- list()
+for (i in 1:length(ExpnGroups)){
+  # print(ExpnGroups[i])
+  res <- SurvObjects(clinData_highExp, c("Event.Free.Survival.Time.in.Days", "Event.ID"),ExpnGroups[i], time = "DtoY")
+  survList.EFS[[ExpnGroups[i]]] <- res
+}
+
+# summary(survList.EFS)
+```
+
+loglikelihood did not converge for  "ARC",  "CETP", "CLIP3", "IL5RA","NPTX2","NXF3","PCDHGA11","TM4SF1"    
+
+```{r}
+survList.OS <- list()
+for (i in 1:length(ExpnGroups)){
+  # print(ExpnGroups[i])
+  res <- SurvObjects(clinData_highExp, c("Overall.Survival.Time.in.Days", "OS.ID"),ExpnGroups[i], time = "DtoY")
+  survList.OS[[ExpnGroups[i]]] <- res
+}
+```
+
+
+
+#Use Compare Groups identify differences
+
+Select Columns of Interest:
+
+Relapse..Yes.or.no: probably no change- see EFS above
+MRD. :Maybe a change. signficance difficult
+MRD....EOI1 :Yes, see differences from some examples below. So likely to be good indicator
+MRD....EOI2 : Not as much sig, but also, many missing values (NAs)
+LSC17_Group: Not much significant.
+LSC17_Quantile: if q1 is zero, there cannot be statistics calculated
+CR.EOI1: Yes, see a difference in CR status. 
+CR.EOI2: Yes, see a difference in CR status. 
+timeToEvent :No difference
+timeToDeath :No difference. 
+
+
+#Minimum Residual Disease
+
+```{r}
+compareMRD <- function(clinData,gene){
+  library(compareGroups)
+  
+  rnames <- paste(gene,c("MRD.EOI1","MRD.EO12"),sep=".")
+  
+  #EOI group is the response variable and MRD is explanatory.  
+  r <- compareGroups(clinData[,gene] ~ clinData$MRD....EOI1 +
+                       clinData$MRD....EOI2, method=4,Q1=0,Q3=1, ref.y=2)
+  t <- createTable(r, show.ratio = TRUE)
+  
+  N <- t$avail[,c("AboveMaxBM", "similarToBM")] %>% set_colnames(., c("AboveMaxBM.N", "similarToBM.N"))
+  t$descr -> descr
+  
+  descr <- cbind(N, descr)
+  rownames(descr) <- rnames
+  
+  list <- list(N, descr)
+  
+  return(descr)
+}
+```
+
+
+```{r}
+FormatResults <- function(df,orderBy){
+  library(stringr)
+  #df is the results of the compareMRD(), etc functions which have been rbind() and converted to dataframe
+  #output of compareMRD(), etc is a list of matrices. 
+  #order by is based on the str_split_fixed() output - either the first column of aboveMaxBM split, or second column of aboveMaxBM split. 
+  
+  df$gene <- str_split_fixed(rownames(df), pattern = "\\.", 3)
+  
+  df$AboveMaxBM <- str_split_fixed(df$AboveMaxBM, pattern = " ", 2)
+  df$similarToBM <- str_split_fixed(df$similarToBM, pattern = " ", 2)
+  
+  df$OR <- str_split_fixed(df$OR, pattern = " ", 2)
+  df$p.overall <- as.numeric(as.character(gsub("<", "", df$p.overall)))
+  
+  df$AboveMaxBM[,2] <- gsub("\\(|\\)", "",df$AboveMaxBM[,2] ) %>% gsub("\\%", "", .)
+  df$similarToBM[,2] <- gsub("\\(|\\)", "", df$similarToBM[,2]) %>% gsub("\\%", "", .)
+  
+  if (orderBy == 1){
+    df$orderBy <- as.numeric(as.character(df$AboveMaxBM[,1]))
+    df <- df[order(-df$orderBy, df$p.overall), ]
+  }else if (orderBy == 2){
+    df$orderBy <- as.numeric(as.character(df$AboveMaxBM[,2]))
+    df <- df[order(-df$orderBy, df$p.overall), ]
+  }
+  
+  return(df)
+}
+```
+
+```{r message=FALSE,warning=FALSE}
+MRD <- lapply(ExpnGroups, compareMRD, clinData=clinData_highExp)
+MRD <- as.data.frame(do.call(rbind, MRD))
+head(MRD)
+```
+
+NOTE: There are a number of genes whose glmfit did not converge, same as with survival analysis above... 
+These will need to be investigated, or possibly removed. 
+
+```{r message=FALSE,warning=FALSE}
+MRD <- FormatResults(MRD,orderBy = 1)
+# write.csv(MRD, "TARGET_AML_NanostringPanel_MRDassociation_62GenesOfInterest_30Aug2017.csv")
+```
+
+```{r}
+MRD.refined <- lapply(ExpnGroups.refined, compareMRD, clinData=clinData_refinfed)
+MRD.refined <- as.data.frame(do.call(rbind, MRD.refined))
+head(MRD.refined)
+```
+
+```{r}
+MRD.refined <- FormatResults(MRD.refined, orderBy = 1)
+# write.csv(MRD.refined, "TARGET_AML_NanostringPanel_MRDassociations_28GenesOfInterest_20June2017.csv")
+```
+
+
+#Complete Remission
+
+```{r}
+compareCR <- function(clinData,gene){
+  
+  # clinData <- clinData[which(clinData$CR.EOI2 != "Unevaluable"),] #possibly remove unevaluables?
+  
+  rnames <- paste(gene,c("CR.EOI1","CR.EO12"),sep=".")
+  CR <- c("CR.EOI1", "CR.EOI2")
+  form <- as.formula(paste(gene, paste(CR, collapse = "+"), sep="~"))
+  
+  #EOI expression group is response, and CR is explanatory. 
+  r <- compareGroups(form, data=clinData, ref.y=2)
+  t <- createTable(r, hide = c( CR.EOI1="CR", CR.EOI2="CR"), show.ratio = TRUE)
+  
+  NotCR <- t$descr[c("CR.EOI1: Not in CR", "CR.EOI2: Not in CR"), ] 
+  N <- t$avail[,c("AboveMaxBM", "similarToBM")] %>% set_colnames(., c("AboveMaxBM.N", "similarToBM.N"))
+  
+  t.NotCR <- cbind(N, rownames(NotCR))
+  t.NotCR <- cbind(t.NotCR, NotCR)
+  rownames(t.NotCR) <- rnames
+  
+  return(t.NotCR)
+}
+```
+
+```{r warning=FALSE, message=FALSE}
+CR <- lapply(ExpnGroups, compareCR, clinData=clinData_highExp)
+CR <- as.data.frame(do.call(rbind, CR))
+head(CR)
+```
+
+
+```{r warning=FALSE, message=FALSE}
+CR <- FormatResults(CR, orderBy = 2)
+# write.csv(CR, "TARGET_AML_NanotringPanel_CRassociations_62GenesofInterest_30Aug2017.csv")
+```
+
+```{r warning=FALSE}
+CR.refined <- lapply(ExpnGroups.refined,compareCR,clinData=clinData_refinfed)
+CR.refined <- as.data.frame(do.call(rbind, CR.refined))
+```
+
+```{r warning=FALSE, message=FALSE}
+CR.refined <- FormatResults(CR.refined, orderBy = 2)
+# write.csv(CR.refined, "TARGET_AML_NanostringPanel_CRassociations_28GenesOfInterest.csv")
+```
+
+
+#Relapse 
+
+```{r}
+compareRelapse <- function(clinData, gene){
+
+  Rel <- c("Relapse.")
+  form <- as.formula(paste(gene, paste(Rel, collapse = "+"), sep="~"))
+  
+  r <- compareGroups(form, data=clinData, ref.y=2)
+  t <- createTable(r, hide.no="no", show.ratio = TRUE)
+  
+  
+  descr <- t$descr
+  status <- rownames(t$avail)
+  Relapse <- cbind(status, t$avail)
+  Relapse <- cbind(Relapse, descr)
+  colnames(Relapse) <- c("status", "N", "N.AboveMaxBM", "N.similarToBM", "method", "select", "Fact OR/HR", "AboveMaxBM", "similarToBM", "OR", "p.ratio", "p.overall")
+  # Relapse <- Relapse[,c(2:3,7:11)] 
+  # rownames(Relapse) <- rnames #cannot set rownames on character vector...arg
+  
+  return(Relapse)
+}
+```
+
+
+```{r warning=FALSE, message=FALSE}
+rnames <- sapply(ExpnGroups, function(x) paste(x,c("Relapse"),sep="."))
+
+Relapse <- lapply(ExpnGroups, compareRelapse, clinData=clinData_highExp)
+Relapse <- as.data.frame(do.call(rbind, Relapse))
+rownames(Relapse) <- rnames
+
+Relapse <- FormatResults(Relapse, orderBy = 2)
+
+# write.csv(Relapse, "TARGET_AML_NanostringPanel_RelapseAssociations_62GenesOfInterest_30Aug2017.csv")
+```
+
+```{r warning=FALSE, message=FALSE}
+rnames.2 <- sapply(ExpnGroups.refined, function(x) paste(x, "Relapse", sep="."))
+Relapse.refined <- lapply(ExpnGroups.refined, compareRelapse, clinData=clinData_refinfed)
+Relapse.refined <- as.data.frame(do.call(rbind, Relapse.refined))
+rownames(Relapse.refined) <- rnames.2
+
+Relapse.refined <- FormatResults(Relapse.refined, orderBy=2)
+# write.csv(Relapse.refined, "TARGET_AML_NanostringPanel_RelapseAssociations_28GenesOfInterest_20June2017.csv")
+```
+ 
+
+#Compare Probabilities of Event 
+
+```{r}
+compareTime2Event<- function(clinData, gene){
+  
+  T2E <- c("timeToEvent","timeToDeath")
+  rnames <- paste(gene, T2E, sep=".")
+  form <- as.formula(paste(gene, paste(T2E, collapse = "+"), sep="~"))
+  
+  #Gene Expn group as response, and time to event as explanatory 
+  r <- compareGroups(form, data=clinData, ref.y=2) #compare at 5years
+  t <- createTable(r)
+  
+  descr <- t$descr
+  description <- rownames(t$avail)
+  N <- t$avail[,c("AboveMaxBM", "similarToBM")] %>% set_colnames(., c("AboveMaxBM.N", "similarToBM.N"))
+  
+  T2EProb <- cbind(description, N)
+  T2EProb <- cbind(T2EProb, descr)
+  rownames(T2EProb) <- rnames 
+  
+  return(T2EProb)
+}
+```
+
+```{r}
+FormatT2E <- function(T2E.df){
+  T2E.df$AboveMaxBM <- as.numeric(as.character(gsub("\\%", "", T2E.df$AboveMaxBM)))
+  T2E.df$similarToBM <- as.numeric(as.character(gsub("\\%", "", T2E.df$similarToBM)))
+  
+  T2E.df$p.overall <- as.numeric(as.character(T2E.df$p.overall))
+  T2E.df$gene <- str_split_fixed(rownames(T2E.df), pattern = "\\.", 2)
+  T2E.df <- T2E.df[order(-T2E.df$AboveMaxBM, T2E.df$p.overall), ]
+  
+  return(T2E.df)
+}
+```
+
+```{r warning=FALSE, message=FALSE}
+T2EProb <- lapply(ExpnGroups, compareTime2Event, clinData=clinData_highExp)
+T2EProb <- as.data.frame(do.call(rbind, T2EProb))
+T2EProb <- FormatT2E(T2EProb)
+# write.csv(T2EProb, "TARGET_AML_NanostringPanel_TimeToEvent_62GenesOfInterest_30Aug2017.csv")
+```
+
+
+```{r warning=FALSE, message=FALSE}
+T2EProb.refined <- lapply(ExpnGroups.refined, compareTime2Event, clinData=clinData_refinfed)
+T2EProb.refined <- as.data.frame(do.call(rbind, T2EProb.refined))
+T2EProb.refined <- FormatT2E(T2EProb.refined)
+# write.csv(T2EProb.refined, "TARGET_AML_NanostringPanel_TimeToEvent_28GenesofInterest_20June2017.csv")
+```
+
+
+
+
+
+#Select the Genes with the lowest P-Values across the Associations and highest % or median 
+goi = genes of interest
+
+MRD,CR,RELAPSE,T2E
+```{r}
+# groups with great than 4 members
+FivePercent <- ExpnGroups[which(sapply(clinData_highExp[,ExpnGroups], function(x) sum(x == "AboveMaxBM")) >= 4)] #50 of 63 
+```
+
+```{r}
+MRD.goi <- MRD[MRD$gene[,1] %in% FivePercent, ] %>% subset(., as.numeric(as.character(.$similarToBM[,1])) == 0 & p.overall < 0.05) #p had NA values!!
+
+CR.goi <- CR[CR$gene[,1] %in% FivePercent, ] %>% subset(., orderBy >= 40 & p.overall < 0.05) #
+
+Relapse.goi <- Relapse[Relapse$gene[,1] %in% FivePercent, ] %>% subset(., orderBy >= 50) #
+
+T2EProb.goi <- T2EProb[T2EProb$gene[,1] %in% FivePercent, ] %>% subset(., AboveMaxBM >= 50) #
+```
+
+
+```{r}
+goi.list <- list(MRD.goi, CR.goi, Relapse.goi, T2EProb.goi)
+goi.PerComparison <- sapply(goi.list, function(x) x$gene[,1])
+goi <- unique(do.call(c, goi.PerComparison))
+
+# cat(goi[order(goi)], sep="\t", file="GenesFoundAssociatedWithAllClinicalCharsOfInterest.txt")
+# invisible(lapply(names(goi.list), function(x) write.csv(file=paste0(x,".csv"), goi.list[[x]])))
+```
+
+#Visualizations
+
+from ggpubr:
+`stat_compare_means()`: Non-supported method specified. Allowed methods are one of: t.test, t.test, t.test, wilcox.test, wilcox.test, wilcox.test, anova, anova, kruskal.test, kruskal.test
+
+
+```{r}
+colors <- rainbow(3, s=0.5,v=0.85, start=0.5, end=0.8)
+  colorCodes <- c(BM=colors[1], similarToBM=colors[2],AboveMaxBM=colors[3])
+```
+
+#MRD by Expression Group 
+
+```{r}
+MRD.EOI <- clinData_highExp[, c("MRD....EOI1","MRD....EOI2",ExpnGroups)]
+
+#genes selected bc A) of interest to lab b) associated in MRD at EOI1 and EOI2
+g <- c("COL23A1", "IGSF10", "NRG4", "AIF1L","WT1", "PRAME")
+
+
+lapply(g, function(x) ggplot(MRD.EOI1, aes(x=MRD.EOI1[,x], y=MRD....EOI1, fill=MRD.EOI1[,x])) + geom_boxplot() + labs(title=x) + theme_JS + lims(y=c(min(MRD.EOI1$MRD....EOI1), max(MRD.EOI1$MRD....EOI1) + 2)) + stat_compare_means(method="kruskal.test") + scale_fill_manual(values = rainbow_hcl(2)))
+```
+
+
+#CR and Relapse 
+
+```{r}
+
+```
+
+
+
+#time to event 
+
+```{r message=FALSE}
+#genes chose due to high prob of event 
+# g.surv <- c("HOXB5",
+# "HOXB6",
+# "H19",
+# "IGSF10",
+# "IRX3",
+# "NTRK1",
+# "COL23A1",
+# "HOXA6",
+# "VWF",
+# "COL4A5",
+# "PRAME",
+# "WT1")
+
+# SurvivalPlot(survList.EFS$HOXB5$survFit, LegendTitle = "HOXB5", timeUnit = "Years", colors = rainbow_hcl(2))
+colors <- rainbow(3, s=0.5,v=0.85, start=0.5, end=0.8) #DX, EOI, BM colors
+colors2 <- rainbow_hcl(2) #aboveMAXBM colors
+colorCodes <- c(BM=colors[1], similarToBM=colors2[2],AboveMaxBM=colors[3],DX=colors[2]) 
+
+EFS.plots <- lapply(ExpnGroups, function(x) SurvivalPlot(survList.EFS[[x]]$survFit, LegendTitle = x, timeUnit = "Years",colors =  c(similarToBM=colors2[2], AboveMaxBM=colors[3]))) %>% set_names(ExpnGroups)
+```
+
+
+```{r}
+lapply(names(EFS.plots), function(i) ggsave(filename = paste0(i, "EFS_KMplot.pdf"), plot = EFS.plots[[i]], device="pdf", height = 5, width=8, units = "in"))
+```
+
+
+```{r}
+# g.OS <- c("HOXB5","HOXB6","HOXA6",
+# "H19",
+# "IRX3",
+# "KCNN2",
+# "PRAME",
+# "WT1")
+
+# pdf(file="TARGET_AML_NanosgtringPanel_OverallSurvival_EOIgroups.pdf")
+OS.plots <- lapply(ExpnGroups, function(x) SurvivalPlot(survList.OS[[x]]$survFit, LegendTitle = x, timeUnit = "Years", c(similarToBM=colors2[2], AboveMaxBM=colors[3]))) %>% set_names(ExpnGroups)
+# dev.off()
+```
+
+```{r}
+# lapply(names(OS.plots), function(i) ggsave(filename=paste0(i, "_OS_KMplot.pdf"), plot=OS.plots[[i]], device = "pdf", heigh=5, width=8,units="in"))
+```
+
+
+
+#Combine Expression Data to Clinical Data 
+
+```{r warning=FALSE, message=FALSE}
+nSolverNorm.cts <- read.csv("TARGET_AML_NanostringPanel_62GenesOfInterest_nSolverNorm_Counts.csv", stringsAsFactors = FALSE)
+
+head(nSolverNorm.cts[,1:5])
+```
+
+```{r}
+nSolverNorm.cts$USI <- gsub("\\.1", "", nSolverNorm.cts$X)
+nSolverNorm.cts.CDEs <- subset(nSolverNorm.cts, grepl("DX|EOI", nSolverNorm.cts$Group))
+
+head(nSolverNorm.cts.CDEs[,1:5])
+```
+
+```{r}
+library(reshape2)
+genesByGroup <- melt(nSolverNorm.cts)
+colnames(genesByGroup) <- c("USI", "Group", "Gene", "NormalizedCount")
+head(genesByGroup)
+```
+
+```{r}
+forMerge <- merge_clinData[, which( ! colnames(merge_clinData) %in% ExpnGroups)]
+
+CDEs_DX_EOI <- merge(forMerge, nSolverNorm.cts.CDEs, by.x="TARGET.USI.1", by.y="USI", all.y = TRUE)
+
+# write.csv(CDEs_DX_EOI, "TARGET_AML_NanostringPanel_62GenesofInterest_CDEs_nSolverNorm_counts.csv")
+```
+
+
+#Relate Expression Values to Survival Data. 
+
+This does not appear to be very informative again. 
+```{r}
+DX_Expn <- subset(nSolverNorm.cts, Group == "DX") %>% set_rownames(., .[,"X"])
+EOI_Expn <-  subset(nSolverNorm.cts, Group =="EOI") %>% set_rownames(., .[,"X"])
+rownames(EOI_Expn) <- gsub("\\.1", "", rownames(EOI_Expn))
+
+
+coxph(Surv(merge_clinData$Event.Free.Survival.Time.in.Days, merge_clinData$Event.ID) ~
+        EOI_Expn[rownames(merge_clinData),"AIF1L"])
+coxph(Surv(merge_clinData$Event.Free.Survival.Time.in.Days, merge_clinData$Event.ID) ~
+        DX_Expn[rownames(merge_clinData),"AIF1L"])
+```
+
+
+
